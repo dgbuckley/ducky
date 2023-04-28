@@ -1,8 +1,19 @@
 use std::env::args;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chatgpt::prelude::*;
+
+fn is_git_repo(dir: &Path) -> bool {
+    let output = std::process::Command::new("git")
+        .arg("rev-parse")
+        .arg("--is-inside-work-tree")
+        .current_dir(dir)
+        .output()
+        .expect("failed to execute git");
+
+    output.status.success()
+}
 
 async fn load_or_start_conversation(client: &ChatGPT, name: &str) -> Result<Conversation> {
     let mut config_dir_path = PathBuf::new();
@@ -30,6 +41,17 @@ async fn load_or_start_conversation(client: &ChatGPT, name: &str) -> Result<Conv
     };
 
     Ok(conversation)
+}
+
+fn sanatized_name(path: &Path) -> String {
+    let name = path
+        .to_str()
+        .unwrap()
+        .to_lowercase()
+        .replace(" ", "_")
+        .replace("/", "-");
+
+    name
 }
 
 async fn store_conversation(conversation: &Conversation, name: &str) -> Result<()> {
@@ -60,20 +82,28 @@ async fn main() -> Result<()> {
     let mut arg_it = args();
     let key = arg_it.nth(1).unwrap();
     let prompt = arg_it.collect::<Vec<String>>().join(" ");
-    let name = "test";
+
+    let cwd = std::env::current_dir().unwrap();
+    let session = if is_git_repo(&cwd) {
+        sanatized_name(&cwd)
+    } else {
+        "default".to_string()
+    };
 
     // Creating a new ChatGPT client.
     // Note that it requires an API key, and uses
     // tokens from your OpenAI API account balance.
     let client = ChatGPT::new(key)?;
-    let mut conversation = load_or_start_conversation(&client, name).await?;
+    let mut conversation = load_or_start_conversation(&client, &session).await?;
 
     // // Sending a message and getting the completion
     let response = conversation.send_message(prompt).await?;
 
     println!("Response: {}", response.message().content);
 
-    store_conversation(&conversation, name).await?;
+    if session != "default" {
+        store_conversation(&conversation, &session).await?;
+    }
 
     Ok(())
 }
