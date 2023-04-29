@@ -5,12 +5,15 @@ use chatgpt::prelude::*;
 use clap::Parser;
 use sha2::Digest;
 use anyhow::{anyhow,Result};
+use std::io::{self, stdin, stdout, Write};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Arg{
     #[clap(short, long)]
     conversation: Option<String>,
+    #[clap(short, long)]
+    repl: bool,
     prompt: Vec<String>,
 }
 
@@ -118,13 +121,42 @@ fn conversation_name(args: &Arg) -> Result<String> {
     }
 }
 
+fn conversation_prompt(args: &Arg) -> Result<String> {
+    let mut prompt = args.prompt.join(" ");
+    if !prompt.is_empty() {return Ok(prompt)}
+    loop {
+        print!("Enter Prompt: ");
+        _ = stdout().flush();
+        stdin().read_line(&mut prompt).unwrap();
+        if !prompt.is_empty() {return Ok(prompt);}
+        print!("\n");
+    }
+}
+
+async fn repl(client: &ChatGPT, conversation: &mut Conversation, session: String) -> Result<()> {
+    // TODO catch Ctrl-C to save conversation
+    loop {
+        print!("> ");
+        _ = stdout().flush();
+        let mut input = String::new();
+        stdin().read_line(&mut input)?;
+        if input.trim() == "quit" {
+            break;
+        }
+        let response = conversation.send_message(input.trim()).await?;
+        print!("---\n{}\n---\n", response.message().content);
+    }
+    
+    store_conversation(&conversation, &session).await?;
+    
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Arg::parse();
 
     let key = std::env::var("DUCKY_GPT_KEY")?;
-    let prompt = args.prompt.join(" ");
-
     let session = conversation_name(&args)?;
 
     // Creating a new ChatGPT client.
@@ -133,7 +165,12 @@ async fn main() -> Result<()> {
     let client = ChatGPT::new(key)?;
     let mut conversation = load_or_start_conversation(&client, &session).await?;
 
-    // // Sending a message and getting the completion
+    if args.repl {
+        repl(&client, &mut conversation, session).await?;
+        return Ok(());
+    }
+
+    let prompt = conversation_prompt(&args)?;
     let response = conversation.send_message(prompt).await?;
 
     println!("Response: {}", response.message().content);
