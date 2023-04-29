@@ -30,3 +30,6 @@ conversations can be repo specific or global
 - have api for usage as library
   - Possibly like kakoune, where commands can be sent to a "session" with a certain flag
 - ability to look through history of conversation. Pretty print into a pager?
+- Add conversation creation option asking for initial promt
+  - Options for default, a user created template, or custom prompt
+  - If template selected give opprotunity to edit and customize it for conversation
