@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use chatgpt::prelude::*;
 use clap::Parser;
 use sha2::Digest;
+use anyhow::{anyhow,Result};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -82,23 +83,33 @@ fn sha256_hash_string(input: &str) -> String {
     result_str
 }
 
+fn git_conversation_name() -> Result<String> {
+    let cwd = std::env::current_dir().unwrap();
+        let output = std::process::Command::new("git")
+            .args(&["rev-parse", "--show-toplevel"])
+            .current_dir(&cwd)
+            .output()
+            .expect("failed to execute git");
+
+        let path = String::from_utf8(output.stdout)?.replace("\n", "");
+
+        Ok(sha256_hash_string(&path))
+}
+
 fn conversation_name(args: &Arg) -> Result<String> {
     let cwd = std::env::current_dir().unwrap();
     if is_git_repo(&cwd) {
         let conv = match args.conversation.clone() {
-
             Some(conv) => conv.clone(),
             None => {
-                let path = cwd.as_path();
-                sha256_hash_string(path.to_str().unwrap())
+                git_conversation_name()?
             }
         };
 
         if !conv.starts_with(":") {
             return Ok(conv.to_string());
         }
-        let path = cwd.as_path();
-        let mut project = sha256_hash_string(path.to_str().unwrap());
+        let mut project = git_conversation_name()?;
         project.push_str(&conv);
 
         Ok(project)
@@ -111,7 +122,7 @@ fn conversation_name(args: &Arg) -> Result<String> {
 async fn main() -> Result<()> {
     let args = Arg::parse();
 
-    let key = std::env::var("DUCKY_GPT_KEY").unwrap();
+    let key = std::env::var("DUCKY_GPT_KEY")?;
     let prompt = args.prompt.join(" ");
 
     let session = conversation_name(&args)?;
