@@ -2,18 +2,15 @@
 
 ## Active Task
 
-- getting conversations to a usable place
-  - easily access and create repo-specific and global conversations
-  - correct detection of the root of a project
+- repl like mode
+- launch with -r|--repl
 
 ## Short term goals
 
-- read in flags with the clap library
-  - use clap to read in a -c | --conversation flag
-- only save the conversation if the -c flag was called
-- then we can focus on git repository checking
-  - Initially impemented, needs polishing
 - If no prompt given and no stdin, open up EDITOR for setting the prompt
+  - if stdin and a prompt, send stdin as "code".
+- have more conversational styled mode where repeated questions and answers can be given without rerunning command
+- Format the recieved markdown text in the terminal
 
 # Ideas
 
@@ -25,7 +22,10 @@ conversations can be repo specific or global
 
 ## Longer term goals
 
-- have more conversational styled mode where repeated questions and answers can be given without rerunning comman
+- Beutify cli
+  - color formatting code
+  - paging when output is larger than the terminal
+  - better selecting, maybe with: https://docs.rs/dialoguer/latest/dialoguer/
 - Spawn a per-conversation daemon
 - have api for usage as library
   - Possibly like kakoune, where commands can be sent to a "session" with a certain flag
