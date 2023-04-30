@@ -1,12 +1,13 @@
-use std::fs::{self, File};
+mod conversation;
+
+use crate::conversation::{config_path, State};
+
+use std::fs;
 use std::io::{stdin, stdout, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use chatgpt::prelude::*;
 use clap::Parser;
-use directories::BaseDirs;
-use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
 #[derive(Parser)]
@@ -34,131 +35,12 @@ fn is_git_repo(dir: &Path) -> bool {
     output.status.success()
 }
 
-#[derive(Serialize, Deserialize)]
-struct ConversationData {
-    model: String,
-    history: Vec<chatgpt::types::ChatMessage>,
-}
-
-struct ConversationState {
-    conversation: Conversation,
-    model: ChatGPTEngine,
-    name: Option<String>,
-}
-
-fn get_config_dir<'a>() -> Result<PathBuf> {
-    let config_dir = match BaseDirs::new() {
-        Some(base_dirs) => {
-            let config_dir_base = base_dirs.config_dir();
-            let mut config_dir = PathBuf::from(config_dir_base);
-            config_dir.push("ducky");
-
-            if !config_dir.exists() {
-                match fs::create_dir_all(&config_dir) {
-                    Ok(_) => config_dir,
-                    Err(e) => return Err(anyhow!("{}", e)),
-                }
-            } else {
-                config_dir
-            }
-        }
-        None => return Err(anyhow!("Unable to get config directory")),
-    };
-
-    Ok(config_dir)
-}
-
-impl ConversationState {
-    // store will save the conversation data in the config dir if self.name is not None
-    fn store(self: &Self) -> Result<()> {
-        println!("{:?}", self.name);
-        match &self.name {
-            Some(name) => {
-                let config_dir = get_config_dir()?;
-                let mut path = config_dir;
-                path.push(name);
-                path.set_extension("json");
-
-                let mut file = File::create(path)?;
-                let conv = ConversationData {
-                    model: self.model.to_string(),
-                    history: self.conversation.history.clone(),
-                };
-                let contents = serde_json::to_string(&conv)?;
-                file.write_all(contents.as_bytes())?;
-            }
-            _ => (),
-        }
-        Ok(())
-    }
-
-    // load will read in an existing conversation
-    fn load_from(path: &Path, name: Option<String>, key: &str) -> Result<Self> {
-        let mut file = File::open(path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-
-        let conv: ConversationData = serde_json::from_str(&contents)?;
-
-        let model = engine_from_str(&conv.model)?;
-        let client = ChatGPT::new_with_config(
-            key,
-            ModelConfigurationBuilder::default()
-                .engine(model)
-                .build()
-                .unwrap(),
-        )?;
-
-        let conversation = Conversation::new_with_history(client, conv.history);
-
-        Ok(ConversationState {
-            conversation,
-            model,
-            name,
-        })
-    }
-
-    // create a new state and initialize the gpt client
-    fn create(name: Option<String>, engine: &str, key: &str) -> Result<Self> {
-        let model = engine_from_str(engine)?;
-        let client = ChatGPT::new_with_config(
-            key,
-            ModelConfigurationBuilder::default()
-                .engine(model)
-                .build()
-                .unwrap(),
-        )?;
-
-        // TODO support a first message
-        let conversation = client.new_conversation();
-        // let conversation = Conversation::new(client, first_message);
-
-        Ok(ConversationState {
-            conversation,
-            model,
-            name,
-        })
-    }
-}
-
-fn engine_from_str(s: &str) -> Result<ChatGPTEngine> {
-    match s {
-        "gpt-3.5-turbo" => Ok(ChatGPTEngine::Gpt35Turbo),
-        "gpt-3.5-turbo-0301" => Ok(ChatGPTEngine::Gpt35Turbo_0301),
-        "gpt-4" => Ok(ChatGPTEngine::Gpt4),
-        "gpt-4-32k" => Ok(ChatGPTEngine::Gpt4_32k),
-        "gpt-4-0314" => Ok(ChatGPTEngine::Gpt4_0314),
-        "gpt-4-32k-0314" => Ok(ChatGPTEngine::Gpt4_32k_0314),
-        custom => Err(anyhow!("Invalid model: {}", custom)),
-        // custom => Ok(ChatGPTEngine::Custom(custom.clone())),
-    }
-}
-
-fn start_conversation(name: Option<String>, key: &str, forced: bool) -> Result<ConversationState> {
+fn start_conversation(name: Option<String>, key: &str, forced: bool) -> Result<State> {
     if forced {
-        return Ok(ConversationState::create(None, "gpt-3.5-turbo", key)?);
+        return Ok(State::create(None, "gpt-3.5-turbo", key)?);
     }
 
+    // TODO use get https://api.openai.com/v1/models to get a list of models
     const MODELS: [&'static str; 7] = [
         "default",
         "gpt-3.5-turbo",
@@ -191,35 +73,22 @@ fn start_conversation(name: Option<String>, key: &str, forced: bool) -> Result<C
         }
     }
 
-    let engine = if used_model == "default" {
-        engine_from_str("gpt-3.5-turbo")?
+    used_model = if used_model == "default" {
+        "gpt-3.5-turbo".to_string()
     } else {
-        engine_from_str(&used_model)?
+        used_model
     };
-    let client = ChatGPT::new_with_config(
-        key,
-        ModelConfigurationBuilder::default()
-            .engine(engine)
-            .build()
-            .unwrap(),
-    )?;
-    let conv = (&client).new_conversation();
-    return Ok(ConversationState {
-        conversation: conv,
-        model: engine,
-        name,
-    });
+    let state = State::create(name, &used_model, key)?;
+    Ok(state)
 }
 
 async fn load_or_start_conversation(
     key: &str,
     name: Option<String>,
     forced: bool,
-) -> Result<ConversationState> {
+) -> Result<State> {
     if let Some(name) = name {
-        let mut config_file_path = get_config_dir()?;
-        config_file_path.push(name.to_owned());
-        config_file_path.set_extension("json");
+        let config_file_path = config_path(&name)?;
 
         if !config_file_path.parent().unwrap().exists() {
             fs::create_dir_all(&config_file_path.parent().unwrap())?;
@@ -230,7 +99,7 @@ async fn load_or_start_conversation(
             return Ok(client);
         }
 
-        let conv = ConversationState::load_from(config_file_path.as_path(), Some(name), key)?;
+        let conv = State::load_from(config_file_path.as_path(), Some(name), key)?;
         return Ok(conv);
     }
 
@@ -326,7 +195,7 @@ fn conversation_prompt(args: &Arg) -> Result<String> {
     }
 }
 
-async fn repl(state: &mut ConversationState) -> Result<()> {
+async fn repl(state: &mut State) -> Result<()> {
     // TODO catch Ctrl-C to save conversation
     loop {
         print!("> ");
