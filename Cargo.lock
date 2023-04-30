@@ -370,6 +370,7 @@ dependencies = [
  "clap",
  "hex",
  "sha2",
+ "tempfile",
  "tokio",
 ]
 

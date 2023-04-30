@@ -1,19 +1,21 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use anyhow::{anyhow, Result};
 use chatgpt::prelude::*;
 use clap::Parser;
 use sha2::Digest;
-use anyhow::{anyhow,Result};
-use std::io::{self, stdin, stdout, Write};
+use std::io::{stdin, stdout, Read, Write};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
-struct Arg{
+struct Arg {
     #[clap(short, long)]
     conversation: Option<String>,
     #[clap(short, long)]
     repl: bool,
+    #[clap(short, long)]
+    editor: bool,
     prompt: Vec<String>,
 }
 
@@ -88,15 +90,15 @@ fn sha256_hash_string(input: &str) -> String {
 
 fn git_conversation_name() -> Result<String> {
     let cwd = std::env::current_dir().unwrap();
-        let output = std::process::Command::new("git")
-            .args(&["rev-parse", "--show-toplevel"])
-            .current_dir(&cwd)
-            .output()
-            .expect("failed to execute git");
+    let output = std::process::Command::new("git")
+        .args(&["rev-parse", "--show-toplevel"])
+        .current_dir(&cwd)
+        .output()
+        .expect("failed to execute git");
 
-        let path = String::from_utf8(output.stdout)?.replace("\n", "");
+    let path = String::from_utf8(output.stdout)?.replace("\n", "");
 
-        Ok(sha256_hash_string(&path))
+    Ok(sha256_hash_string(&path))
 }
 
 fn conversation_name(args: &Arg) -> Result<String> {
@@ -104,9 +106,7 @@ fn conversation_name(args: &Arg) -> Result<String> {
     if is_git_repo(&cwd) {
         let conv = match args.conversation.clone() {
             Some(conv) => conv.clone(),
-            None => {
-                git_conversation_name()?
-            }
+            None => git_conversation_name()?,
         };
 
         if !conv.starts_with(":") {
@@ -121,14 +121,50 @@ fn conversation_name(args: &Arg) -> Result<String> {
     }
 }
 
+fn edit_text(text: &str) -> Result<String> {
+    let mut file = tempfile::NamedTempFile::new()?;
+    file.write_all(text.as_bytes())?;
+
+    let path = file.path();
+    let path = path.to_str().unwrap();
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+    let output = std::process::Command::new(editor)
+        .arg(path)
+        .status()
+        .expect("failed to execute editor");
+
+    if !output.success() {
+        return Err(anyhow!("Unable to open editor"));
+    }
+
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+
+    if contents.is_empty() {
+        return Err(anyhow!("Empty prompt, aborting"));
+    }
+
+    Ok(contents)
+}
+
 fn conversation_prompt(args: &Arg) -> Result<String> {
+    if args.editor {
+        let text = edit_text("")?;
+        return Ok(text);
+    }
+
     let mut prompt = args.prompt.join(" ");
-    if !prompt.is_empty() {return Ok(prompt)}
+    if !prompt.is_empty() {
+        return Ok(prompt);
+    }
     loop {
         print!("Enter Prompt: ");
         _ = stdout().flush();
         stdin().read_line(&mut prompt).unwrap();
-        if !prompt.is_empty() {return Ok(prompt);}
+        if !prompt.is_empty() {
+            return Ok(prompt);
+        }
         print!("\n");
     }
 }
@@ -146,9 +182,9 @@ async fn repl(client: &ChatGPT, conversation: &mut Conversation, session: String
         let response = conversation.send_message(input.trim()).await?;
         print!("---\n{}\n---\n", response.message().content);
     }
-    
+
     store_conversation(&conversation, &session).await?;
-    
+
     Ok(())
 }
 
