@@ -7,7 +7,10 @@ use std::io::{stdin, stdout, Read, Write};
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
+use bat::PrettyPrinter;
 use clap::Parser;
+use rustyline::error::ReadlineError;
+use rustyline::DefaultEditor;
 use sha2::Digest;
 
 #[derive(Parser)]
@@ -206,23 +209,45 @@ fn conversation_prompt(args: &Arg) -> Result<String> {
     }
 }
 
-async fn repl(state: &mut State) -> Result<()> {
-    // TODO catch Ctrl-C to save conversation
-    loop {
-        print!("> ");
-        _ = stdout().flush();
-        let mut input = String::new();
-        stdin().read_line(&mut input)?;
-        if input.trim() == "quit" {
-            break;
-        }
-        let response = state.conversation.send_message(input.trim()).await?;
-        print!("---\n{}\n---\n", response.message().content);
-    }
-
-    state.store()?;
+fn print_markdown(markdown: &str) -> Result<()> {
+    let mut printer = PrettyPrinter::new();
+    printer.input_from_bytes(markdown.as_bytes());
+    printer.language("markdown");
+    printer.print()?;
 
     Ok(())
+}
+
+async fn repl(state: &mut State) -> Result<()> {
+    let mut editor = DefaultEditor::new()?;
+
+    println!(
+        "Welcome to ChatGPT! Type your message below to start chatting, or type 'exit' to quit."
+    );
+    loop {
+        match editor.readline("> ") {
+            Ok(line) => {
+                if line == "exit" {
+                    break;
+                }
+                let response = state.conversation.send_message(line.trim()).await?;
+                print_markdown(&response.message().content)?;
+            }
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C");
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D");
+                break;
+            }
+            Err(err) => {
+                println!("Error: {:?}", err);
+                break;
+            }
+        }
+    }
+    return state.store();
 }
 
 #[tokio::main]
@@ -245,7 +270,7 @@ async fn main() -> Result<()> {
     let prompt = conversation_prompt(&args)?;
     let response = state.conversation.send_message(prompt).await?;
 
-    println!("Response: {}", response.message().content);
+    print_markdown(&response.message().content)?;
 
     state.store()?;
 
