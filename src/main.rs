@@ -1,14 +1,15 @@
-mod conversation;
+mod namespace;
 
-use crate::conversation::{config_path, State};
+use crate::namespace::Namespace;
 
 use std::fs;
 use std::io::{stdin, stdout, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use bat::PrettyPrinter;
 use clap::Parser;
+use directories::BaseDirs;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use sha2::Digest;
@@ -38,6 +39,33 @@ fn is_git_repo(dir: &Path) -> bool {
     output.status.success()
 }
 
+/// Returns the config path and ensures the config
+/// directory exists.
+pub fn config_path(name: &str) -> Result<PathBuf> {
+    let mut config_file_path = match BaseDirs::new() {
+        Some(base_dirs) => {
+            let config_dir_base = base_dirs.config_dir();
+            let mut config_dir = PathBuf::from(config_dir_base);
+            config_dir.push("ducky");
+
+            if !config_dir.exists() {
+                match std::fs::create_dir_all(&config_dir) {
+                    Ok(_) => config_dir,
+                    Err(e) => return Err(anyhow!("{}", e)),
+                }
+            } else {
+                config_dir
+            }
+        }
+        None => return Err(anyhow!("Unable to get config directory")),
+    };
+
+    config_file_path.push(name.to_owned());
+    config_file_path.set_extension("json");
+
+    Ok(config_file_path)
+}
+
 // TODO use get https://api.openai.com/v1/models to get a list of models
 const MODELS: [&'static str; 7] = [
     "default",
@@ -49,9 +77,9 @@ const MODELS: [&'static str; 7] = [
     "gpt-4-32k-0314",
 ];
 
-fn start_conversation(name: Option<String>, key: &str, forced: bool) -> Result<State> {
+fn start_conversation(name: Option<String>, key: &str, forced: bool) -> Result<Namespace> {
     if forced {
-        return Ok(State::create(None, "gpt-3.5-turbo", key)?);
+        return Ok(Namespace::create(None, "gpt-3.5-turbo", key)?);
     }
 
     let model_index = dialoguer::Select::new()
@@ -66,15 +94,12 @@ fn start_conversation(name: Option<String>, key: &str, forced: bool) -> Result<S
         MODELS[model_index]
     };
 
-    let state = State::create(name, &model, key)?;
+    let state = Namespace::create(name, &model, key)?;
+
     Ok(state)
 }
 
-async fn load_or_start_conversation(
-    key: &str,
-    name: Option<String>,
-    forced: bool,
-) -> Result<State> {
+fn load_or_start_conversation(key: &str, name: Option<String>, forced: bool) -> Result<Namespace> {
     match name {
         Some(name) => {
             let config_file_path = config_path(&name)?;
@@ -96,7 +121,7 @@ async fn load_or_start_conversation(
                 return Ok(client);
             }
 
-            let conv = State::load_from(config_file_path.as_path(), Some(name), key)?;
+            let conv = Namespace::load_from(config_file_path.as_path(), Some(name), key)?;
             return Ok(conv);
         }
         None => {
@@ -208,8 +233,10 @@ fn print_markdown(markdown: &str) -> Result<()> {
     Ok(())
 }
 
-async fn repl(state: &mut State) -> Result<()> {
+async fn repl(state: &mut Namespace) -> Result<()> {
     let mut editor = DefaultEditor::new()?;
+
+    let mut convo = state.create_conversation();
 
     println!(
         "Welcome to ChatGPT! Type your message below to start chatting, or type 'exit' to quit."
@@ -220,7 +247,7 @@ async fn repl(state: &mut State) -> Result<()> {
                 if line == "exit" {
                     break;
                 }
-                let response = state.conversation.send_message(line.trim()).await?;
+                let response = convo.send_message(line.trim()).await?;
                 print_markdown(&response.message().content)?;
             }
             Err(ReadlineError::Interrupted) => {
@@ -237,7 +264,16 @@ async fn repl(state: &mut State) -> Result<()> {
             }
         }
     }
-    return state.store();
+
+    // Ensure we update state history before storing it
+    drop(convo);
+
+    if let Some(name) = &state.name {
+        let config_file_path = config_path(&name)?;
+        state.store(&config_file_path)?;
+    }
+
+    Ok(())
 }
 
 #[tokio::main]
@@ -250,7 +286,7 @@ async fn main() -> Result<()> {
     // Creating a new ChatGPT client.
     // Note that it requires an API key, and uses
     // tokens from your OpenAI API account balance.
-    let mut state = load_or_start_conversation(&key, session, args.force).await?;
+    let mut state = load_or_start_conversation(&key, session, args.force)?;
 
     if args.repl {
         repl(&mut state).await?;
@@ -258,11 +294,14 @@ async fn main() -> Result<()> {
     }
 
     let prompt = conversation_prompt(&args)?;
-    let response = state.conversation.send_message(prompt).await?;
+    let response = state.send_message(prompt).await?;
 
     print_markdown(&response.message().content)?;
 
-    state.store()?;
+    if let Some(name) = &state.name {
+        let config_file_path = config_path(&name)?;
+        state.store(&config_file_path)?;
+    }
 
     Ok(())
 }
