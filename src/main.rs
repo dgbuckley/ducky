@@ -213,8 +213,13 @@ fn print_markdown(markdown: &str) -> Result<()> {
     let mut printer = PrettyPrinter::new();
     printer.input_from_bytes(markdown.as_bytes());
     printer.language("markdown");
-    printer.print()?;
 
+    let theme = std::env::var("DUCKY_THEME")
+        .or_else(|_| std::env::var("BAT_THEME"))
+        .unwrap_or_else(|_| "base16".to_string());
+    printer.theme(theme);
+
+    printer.print()?;
     Ok(())
 }
 
