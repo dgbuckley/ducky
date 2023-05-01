@@ -35,23 +35,23 @@ fn is_git_repo(dir: &Path) -> bool {
     output.status.success()
 }
 
+// TODO use get https://api.openai.com/v1/models to get a list of models
+const MODELS: [&'static str; 7] = [
+    "default",
+    "gpt-3.5-turbo",
+    "gpt-3.5-turbo-0301",
+    "gpt-4",
+    "gpt-4-32k",
+    "gpt-4-0314",
+    "gpt-4-32k-0314",
+];
+
 fn start_conversation(name: Option<String>, key: &str, forced: bool) -> Result<State> {
     if forced {
         return Ok(State::create(None, "gpt-3.5-turbo", key)?);
     }
 
-    // TODO use get https://api.openai.com/v1/models to get a list of models
-    const MODELS: [&'static str; 7] = [
-        "default",
-        "gpt-3.5-turbo",
-        "gpt-3.5-turbo-0301",
-        "gpt-4",
-        "gpt-4-32k",
-        "gpt-4-0314",
-        "gpt-4-32k-0314",
-    ];
-
-    let mut used_model: String = "".to_string();
+    let mut used_model = String::new();
     'a: loop {
         // Request desired model
         println!("Specify model for conversation");
@@ -63,8 +63,8 @@ fn start_conversation(name: Option<String>, key: &str, forced: bool) -> Result<S
         print!("Enter model: ");
         _ = stdout().flush();
         // Read in user specified model
-        stdin().read_line(&mut used_model).unwrap();
-        used_model = used_model.replace("\n", "");
+        stdin().read_line(&mut used_model)?;
+        used_model.pop();
         // Check if valid model
         for model in MODELS {
             if model == used_model {
@@ -87,23 +87,34 @@ async fn load_or_start_conversation(
     name: Option<String>,
     forced: bool,
 ) -> Result<State> {
-    if let Some(name) = name {
-        let config_file_path = config_path(&name)?;
+    match name {
+        Some(name) => {
+            let config_file_path = config_path(&name)?;
 
-        if !config_file_path.parent().unwrap().exists() {
-            fs::create_dir_all(&config_file_path.parent().unwrap())?;
-        };
+            if !config_file_path
+                .parent()
+                .ok_or(anyhow!("Failed to get the parent directory"))?
+                .exists()
+            {
+                fs::create_dir_all(
+                    &config_file_path
+                        .parent()
+                        .ok_or(anyhow!("Failed to get the parent directory"))?,
+                )?;
+            };
 
-        if !config_file_path.exists() {
-            let client = start_conversation(Some(name), key, forced)?;
-            return Ok(client);
+            if !config_file_path.exists() {
+                let client = start_conversation(Some(name), key, forced)?;
+                return Ok(client);
+            }
+
+            let conv = State::load_from(config_file_path.as_path(), Some(name), key)?;
+            return Ok(conv);
         }
-
-        let conv = State::load_from(config_file_path.as_path(), Some(name), key)?;
-        return Ok(conv);
+        None => {
+            return start_conversation(None, key, forced);
+        }
     }
-
-    return start_conversation(None, key, forced);
 }
 
 fn sha256_hash_string(input: &str) -> String {
