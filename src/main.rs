@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use bat::PrettyPrinter;
+use chatgpt::types::Role;
 use clap::Parser;
 use directories::BaseDirs;
 use rustyline::error::ReadlineError;
@@ -19,6 +20,16 @@ use sha2::Digest;
 struct Arg {
     #[clap(short, long)]
     conversation: Option<String>,
+
+    #[clap(long)]
+    // TODO add a method to show histor with an index
+    /// Keep the message at the specified index
+    keep_last: Option<usize>,
+
+    #[clap(short, long)]
+    /// Keep the message to send as context with each prompt
+    keep: bool,
+
     #[clap(short, long)]
     repl: bool,
     #[clap(short, long)]
@@ -283,9 +294,6 @@ async fn main() -> Result<()> {
     let key = std::env::var("DUCKY_GPT_KEY")?;
     let session = conversation_name(&args)?;
 
-    // Creating a new ChatGPT client.
-    // Note that it requires an API key, and uses
-    // tokens from your OpenAI API account balance.
     let mut state = load_or_start_conversation(&key, session, args.force)?;
 
     if args.repl {
@@ -293,8 +301,25 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    if let Some(keep) = args.keep_last {
+        let mut n = keep;
+        for i in (0..state.history.len()).rev() {
+            if state.history[i].role != Role::User {
+                continue;
+            }
+            if n > 0 {
+                n -= n;
+                continue;
+            }
+
+            state.context.push(state.history[i].clone());
+        }
+
+        return Ok(());
+    }
+
     let prompt = conversation_prompt(&args)?;
-    let response = state.send_message(prompt).await?;
+    let response = state.send_message(prompt, args.keep).await?;
 
     print_markdown(&response.message().content)?;
 

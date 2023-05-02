@@ -93,6 +93,7 @@ impl Namespace {
     pub async fn send_message<S: Into<String>>(
         &mut self,
         message: S,
+        keep: bool,
     ) -> Result<CompletionResponse> {
         let message = ChatMessage {
             content: message.into(),
@@ -105,7 +106,9 @@ impl Namespace {
         let response = self.client.send_history(&self.context).await?;
 
         self.history.push(response.message().clone());
-        self.context.pop();
+        if !keep {
+            self.context.pop();
+        }
 
         Ok(response)
     }
