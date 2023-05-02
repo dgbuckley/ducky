@@ -54,34 +54,19 @@ fn start_conversation(name: Option<String>, key: &str, forced: bool) -> Result<S
         return Ok(State::create(None, "gpt-3.5-turbo", key)?);
     }
 
-    let mut used_model = String::new();
-    'a: loop {
-        // Request desired model
-        println!("Specify model for conversation");
-        print!("Useable models: ");
-        print!("{}", MODELS[0]);
-        for model in MODELS.iter().skip(1) {
-            print!(", {}", model)
-        }
-        print!("Enter model: ");
-        _ = stdout().flush();
-        // Read in user specified model
-        stdin().read_line(&mut used_model)?;
-        used_model.pop();
-        // Check if valid model
-        for model in MODELS {
-            if model == used_model {
-                break 'a;
-            }
-        }
-    }
+    let model_index = dialoguer::Select::new()
+        .with_prompt("Specify which model you would like to use")
+        .default(0)
+        .items(&MODELS)
+        .interact()?;
 
-    used_model = if used_model == "default" {
-        "gpt-3.5-turbo".to_string()
+    let model = if model_index == 0 {
+        MODELS[1]
     } else {
-        used_model
+        MODELS[model_index]
     };
-    let state = State::create(name, &used_model, key)?;
+
+    let state = State::create(name, &model, key)?;
     Ok(state)
 }
 
