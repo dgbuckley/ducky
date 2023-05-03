@@ -119,14 +119,21 @@ impl Namespace {
         let includes = (self.includes + self.session_len) * 2;
 
         self.history.push(message.clone());
-        let history_len = self.history.len()-1-includes;
+
+        let history_len = if self.history.len() <= includes+1 {
+            0
+        } else {
+            self.history.len()-1-includes
+        };
+        let context_len = self.context.len();
+
         self.context.extend_from_slice(&mut self.history[history_len..]);
 
         let response = self.client.send_history(&self.context).await?;
 
         self.history.push(response.message().clone());
         let last_user = self.context.pop().unwrap();
-        self.context.truncate(self.context.len()-includes);
+        self.context.truncate(context_len);
         if keep {
             self.context.push(last_user);
         }
