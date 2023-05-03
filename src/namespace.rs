@@ -17,6 +17,7 @@ struct ConversationData {
     history: Vec<ChatMessage>,
     context: Vec<ChatMessage>,
     includes: usize,
+    session_len: usize,
 }
 
 pub struct Namespace {
@@ -26,6 +27,7 @@ pub struct Namespace {
     pub history: Vec<ChatMessage>,
     pub context: Vec<ChatMessage>,
     pub includes: usize,
+    pub session_len: usize,
 }
 
 impl Namespace {
@@ -37,6 +39,7 @@ impl Namespace {
             history: self.history.clone(),
             context: self.context.clone(),
             includes: self.includes,
+            session_len: self.session_len,
         };
         let contents = serde_json::to_string(&conv)?;
         file.write_all(contents.as_bytes())?;
@@ -68,6 +71,7 @@ impl Namespace {
             history: conv.history,
             context: conv.context,
             includes: conv.includes,
+            session_len: conv.session_len,
         })
     }
 
@@ -91,6 +95,7 @@ impl Namespace {
             history: vec![],
             context: vec![],
             includes: 2,
+            session_len: 0,
         })
     }
 
@@ -99,14 +104,19 @@ impl Namespace {
         &mut self,
         message: S,
         keep: bool,
+        extend_session: bool,
     ) -> Result<CompletionResponse> {
         let message = ChatMessage {
             content: message.into(),
             role: Role::User,
         };
 
+        if !extend_session {
+            self.session_len = 0;
+        }
+
         // Include both the assistant's response and the user's message for each "includes".
-        let includes = self.includes * 2;
+        let includes = (self.includes + self.session_len) * 2;
 
         self.history.push(message.clone());
         let history_len = self.history.len()-1-includes;
@@ -119,6 +129,10 @@ impl Namespace {
         self.context.truncate(self.context.len()-includes);
         if keep {
             self.context.push(last_user);
+        }
+
+        if extend_session {
+            self.session_len += 1;
         }
 
         Ok(response)

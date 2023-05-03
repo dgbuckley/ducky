@@ -31,6 +31,10 @@ struct Arg {
     keep: bool,
 
     #[clap(short, long)]
+    /// History is kept as context as long as this flag is set. Calling without it will immediately clear the persistant session.
+    persist: bool,
+
+    #[clap(short, long)]
     repl: bool,
     #[clap(short, long)]
     force: bool,
@@ -319,7 +323,7 @@ async fn main() -> Result<()> {
     }
 
     let prompt = conversation_prompt(&args)?;
-    let response = state.send_message(prompt, args.keep).await?;
+    let response = state.send_message(prompt, args.keep, args.persist).await?;
 
     print_markdown(&response.message().content)?;
 
