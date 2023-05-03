@@ -16,6 +16,7 @@ struct ConversationData {
     model: String,
     history: Vec<ChatMessage>,
     context: Vec<ChatMessage>,
+    includes: usize,
 }
 
 pub struct Namespace {
@@ -24,6 +25,7 @@ pub struct Namespace {
     pub name: Option<String>,
     pub history: Vec<ChatMessage>,
     pub context: Vec<ChatMessage>,
+    pub includes: usize,
 }
 
 impl Namespace {
@@ -34,6 +36,7 @@ impl Namespace {
             model: self.model.to_string(),
             history: self.history.clone(),
             context: self.context.clone(),
+            includes: self.includes,
         };
         let contents = serde_json::to_string(&conv)?;
         file.write_all(contents.as_bytes())?;
@@ -64,6 +67,7 @@ impl Namespace {
             name,
             history: conv.history,
             context: conv.context,
+            includes: conv.includes,
         })
     }
 
@@ -79,13 +83,14 @@ impl Namespace {
         )?;
 
         // TODO support a first system message
-
+        // TODO have a way to change the number of includes
         Ok(Namespace {
             client,
             model,
             name,
             history: vec![],
             context: vec![],
+            includes: 2,
         })
     }
 
@@ -100,14 +105,20 @@ impl Namespace {
             role: Role::User,
         };
 
+        // Include both the assistant's response and the user's message for each "includes".
+        let includes = self.includes * 2;
+
         self.history.push(message.clone());
-        self.context.push(message.clone());
+        let history_len = self.history.len()-1-includes;
+        self.context.extend_from_slice(&mut self.history[history_len..]);
 
         let response = self.client.send_history(&self.context).await?;
 
         self.history.push(response.message().clone());
-        if !keep {
-            self.context.pop();
+        let last_user = self.context.pop().unwrap();
+        self.context.truncate(self.context.len()-includes);
+        if keep {
+            self.context.push(last_user);
         }
 
         Ok(response)
