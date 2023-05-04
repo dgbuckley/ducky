@@ -40,6 +40,11 @@ struct Arg {
     force: bool,
     #[clap(short, long)]
     editor: bool,
+
+    #[clap(long)]
+    // Sets the default engine for the conversation
+    set_engine: Option<String>,
+
     prompt: Vec<String>,
 }
 
@@ -82,39 +87,31 @@ pub fn config_path(name: &str) -> Result<PathBuf> {
 }
 
 // TODO use get https://api.openai.com/v1/models to get a list of models
-const MODELS: [&'static str; 7] = [
-    "default",
-    "gpt-3.5-turbo",
-    "gpt-3.5-turbo-0301",
-    "gpt-4",
-    "gpt-4-32k",
-    "gpt-4-0314",
-    "gpt-4-32k-0314",
-];
+// const MODELS: [&'static str; 7] = [
+//     "default",
+//     "gpt-3.5-turbo",
+//     "gpt-3.5-turbo-0301",
+//     "gpt-4",
+//     "gpt-4-32k",
+//     "gpt-4-0314",
+//     "gpt-4-32k-0314",
+// ];
 
-fn start_conversation(name: Option<String>, key: &str, forced: bool) -> Result<Namespace> {
-    if forced {
+fn start_conversation(name: Option<String>, key: &str, arg: &Arg) -> Result<Namespace> {
+    if arg.force {
         return Ok(Namespace::create(None, "gpt-3.5-turbo", key)?);
     }
 
-    let model_index = dialoguer::Select::new()
-        .with_prompt("Specify which model you would like to use")
-        .default(0)
-        .items(&MODELS)
-        .interact()?;
-
-    let model = if model_index == 0 {
-        MODELS[1]
+    let state = if let Some(model) = &arg.set_engine {
+        Namespace::create(name, &model, key)?
     } else {
-        MODELS[model_index]
+        Namespace::create(name, "gpt-3.5-turbo", key)?
     };
-
-    let state = Namespace::create(name, &model, key)?;
 
     Ok(state)
 }
 
-fn load_or_start_conversation(key: &str, name: Option<String>, forced: bool) -> Result<Namespace> {
+fn load_or_start_conversation(key: &str, name: Option<String>, arg: &Arg) -> Result<Namespace> {
     match name {
         Some(name) => {
             let config_file_path = config_path(&name)?;
@@ -132,7 +129,7 @@ fn load_or_start_conversation(key: &str, name: Option<String>, forced: bool) -> 
             };
 
             if !config_file_path.exists() {
-                let client = start_conversation(Some(name), key, forced)?;
+                let client = start_conversation(Some(name), key, arg)?;
                 return Ok(client);
             }
 
@@ -140,7 +137,7 @@ fn load_or_start_conversation(key: &str, name: Option<String>, forced: bool) -> 
             return Ok(conv);
         }
         None => {
-            return start_conversation(None, key, forced);
+            return start_conversation(None, key, arg);
         }
     }
 }
@@ -295,10 +292,10 @@ async fn repl(state: &mut Namespace) -> Result<()> {
 async fn main() -> Result<()> {
     let args = Arg::parse();
 
-    let key = std::env::var("DUCKY_GPT_KEY")?;
+    let key = std::env::var("DUCKY_GPT_KEY").expect("No key found. Please set DUCKY_GPT_KEY.");
     let session = conversation_name(&args)?;
 
-    let mut state = load_or_start_conversation(&key, session, args.force)?;
+    let mut state = load_or_start_conversation(&key, session, &args)?;
 
     if args.repl {
         repl(&mut state).await?;
@@ -322,7 +319,18 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let prompt = conversation_prompt(&args)?;
+    let mut prompt = conversation_prompt(&args)?;
+
+    if !atty::is(atty::Stream::Stdin) {
+        let mut stdin_text = String::new();
+        stdin().read_to_string(&mut stdin_text)?;
+
+        if prompt.len() > 0 {
+            prompt.push_str("\n---\n");
+        }
+        prompt.push_str(&stdin_text);
+    }
+
     let response = state.send_message(prompt, args.keep, args.persist).await?;
 
     print_markdown(&response.message().content)?;
