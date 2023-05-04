@@ -19,7 +19,16 @@ use sha2::Digest;
 #[command(author, version, about, long_about = None)]
 struct Arg {
     #[clap(short, long)]
+    /// The conversation to send the chat with
     conversation: Option<String>,
+
+    #[clap(long)]
+    /// Open EDITOR to enter the prompt
+    editor: bool,
+
+    #[clap(short, long)]
+    /// Keep the message to send as context with each prompt
+    keep: bool,
 
     #[clap(long)]
     // TODO add a method to show histor with an index
@@ -27,24 +36,18 @@ struct Arg {
     keep_last: Option<usize>,
 
     #[clap(short, long)]
-    /// Keep the message to send as context with each prompt
-    keep: bool,
-
-    #[clap(short, long)]
     /// History is kept as context as long as this flag is set. Calling without it will immediately clear the persistant session.
     persist: bool,
 
     #[clap(short, long)]
+    /// Open up a repl
     repl: bool,
-    #[clap(short, long)]
-    force: bool,
-    #[clap(short, long)]
-    editor: bool,
 
     #[clap(long)]
-    // Sets the default engine for the conversation
+    /// Sets the default engine for the conversation
     set_engine: Option<String>,
 
+    /// The prompt to be sent to GPT
     prompt: Vec<String>,
 }
 
@@ -98,10 +101,6 @@ pub fn config_path(name: &str) -> Result<PathBuf> {
 // ];
 
 fn start_conversation(name: Option<String>, key: &str, arg: &Arg) -> Result<Namespace> {
-    if arg.force {
-        return Ok(Namespace::create(None, "gpt-3.5-turbo", key)?);
-    }
-
     let state = if let Some(model) = &arg.set_engine {
         Namespace::create(name, &model, key)?
     } else {
