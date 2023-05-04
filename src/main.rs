@@ -47,6 +47,10 @@ struct Arg {
     /// Sets the default engine for the conversation
     set_engine: Option<String>,
 
+    /// Send the message as a system message and keep
+    #[clap(short, long)]
+    system: bool,
+
     /// The prompt to be sent to GPT
     prompt: Vec<String>,
 }
@@ -330,7 +334,13 @@ async fn main() -> Result<()> {
         prompt.push_str(&stdin_text);
     }
 
-    let response = state.send_message(prompt, args.keep, args.persist).await?;
+    let response = if args.system {
+        state
+            .send_system_message(prompt, args.keep, args.persist)
+            .await?
+    } else {
+        state.send_message(prompt, args.keep, args.persist).await?
+    };
 
     print_markdown(&response.message().content)?;
 

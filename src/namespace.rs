@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     fs::File,
     io::{Read, Write},
     path::Path,
@@ -99,16 +100,16 @@ impl Namespace {
         })
     }
 
-    // send_message sends the model the given message with the namespace's context.
-    pub async fn send_message<S: Into<String>>(
+    async fn send_message_as<S: Into<String>>(
         &mut self,
+        role: Role,
         message: S,
         keep: bool,
         extend_session: bool,
     ) -> Result<CompletionResponse> {
         let message = ChatMessage {
             content: message.into(),
-            role: Role::User,
+            role,
         };
 
         if !extend_session {
@@ -120,22 +121,37 @@ impl Namespace {
 
         self.history.push(message.clone());
 
-        let history_len = if self.history.len() <= includes+1 {
+        let history_len = if self.history.len() <= includes + 1 {
             0
         } else {
-            self.history.len()-1-includes
+            self.history.len() - 1 - includes
         };
         let context_len = self.context.len();
 
-        self.context.extend_from_slice(&mut self.history[history_len..]);
+        self.context
+            .extend_from_slice(&mut self.history[history_len..]);
 
         let response = self.client.send_history(&self.context).await?;
 
         self.history.push(response.message().clone());
         let last_user = self.context.pop().unwrap();
         self.context.truncate(context_len);
-        if keep {
+        if keep || role == Role::System {
             self.context.push(last_user);
+
+            if role == Role::System {
+                // Keep system messages at the start
+                // TODO configure this to optionally keep system messages at the end. OpenAI says this may be better for 3.5 turbo
+                self.context.sort_by(|a, b| {
+                    if a.role == Role::System {
+                        return Ordering::Less;
+                    } else if b.role == Role::System {
+                        return Ordering::Greater;
+                    } else {
+                        return Ordering::Equal;
+                    }
+                });
+            }
         }
 
         if extend_session {
@@ -143,6 +159,31 @@ impl Namespace {
         }
 
         Ok(response)
+    }
+
+    // send_system_message sends a message as a system message and keeps the system
+    // message in the context.
+    pub async fn send_system_message<S: Into<String>>(
+        &mut self,
+        message: S,
+        keep: bool,
+        extend_session: bool,
+    ) -> Result<CompletionResponse> {
+        return self
+            .send_message_as(Role::System, message, keep, extend_session)
+            .await;
+    }
+
+    // send_message sends the model the given message with the namespace's context.
+    pub async fn send_message<S: Into<String>>(
+        &mut self,
+        message: S,
+        keep: bool,
+        extend_session: bool,
+    ) -> Result<CompletionResponse> {
+        return self
+            .send_message_as(Role::User, message, keep, extend_session)
+            .await;
     }
 
     // function to create a ChatGPT conversation using context as the initial history.
