@@ -182,7 +182,7 @@ fn conversation_name(args: &Arg) -> Result<Option<String>> {
 
         Ok(Some(project))
     } else {
-        Ok(None)
+        Ok(args.conversation.clone())
     }
 }
 
