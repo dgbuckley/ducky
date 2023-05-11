@@ -3,7 +3,7 @@ mod namespace;
 use crate::namespace::Namespace;
 
 use std::fs;
-use std::io::{stdin, stdout, Read, Write};
+use std::io::{stdin, Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
@@ -215,23 +215,11 @@ fn edit_text(text: &str) -> Result<String> {
 
 fn conversation_prompt(args: &Arg) -> Result<String> {
     if args.editor {
-        let text = edit_text("")?;
-        return Ok(text);
+        return edit_text("");
     }
 
-    let mut prompt = args.prompt.join(" ");
-    if !prompt.is_empty() {
-        return Ok(prompt);
-    }
-    loop {
-        print!("Enter Prompt: ");
-        _ = stdout().flush();
-        stdin().read_line(&mut prompt).unwrap();
-        if !prompt.is_empty() {
-            return Ok(prompt);
-        }
-        print!("\n");
-    }
+    let prompt = args.prompt.join(" ");
+    Ok(prompt.trim().to_string())
 }
 
 fn print_markdown(markdown: &str) -> Result<()> {
@@ -332,6 +320,11 @@ async fn main() -> Result<()> {
             prompt.push_str("\n---\n");
         }
         prompt.push_str(&stdin_text);
+    }
+
+    if prompt.len() == 0 {
+        eprintln!("No prompt provided, quiting.");
+        return Ok(());
     }
 
     let response = if args.system {
