@@ -44,6 +44,10 @@ struct Arg {
     repl: bool,
 
     #[clap(long)]
+    /// Revise the conversaation and configuration in your editor
+    revise: bool,
+
+    #[clap(long)]
     /// Sets the default engine for the conversation
     set_engine: Option<String>,
 
@@ -270,6 +274,33 @@ async fn repl(state: &mut Namespace) -> Result<()> {
     Ok(())
 }
 
+fn edit_context(state: &mut Namespace) -> Result<()> {
+    let mut file = tempfile::NamedTempFile::new()?;
+
+    let context_toml = toml::to_string(&state.data).unwrap();
+    file.write_all(context_toml.as_bytes())?;
+
+    let path = file.path();
+    let path = path.to_str().ok_or(anyhow!("Unable to get path string"))?;
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+    let output = std::process::Command::new(editor)
+        .arg(path)
+        .status()
+        .expect("failed to open editor");
+
+    if !output.success() {
+        return Err(anyhow!("Unable to open editor"));
+    }
+
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+
+    state.data = toml::from_str(&contents)?;
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Arg::parse();
@@ -284,10 +315,14 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    if args.revise {
+        return edit_context(&mut state);
+    }
+
     if let Some(keep) = args.keep_last {
         let mut n = keep;
-        for i in (0..state.history.len()).rev() {
-            if state.history[i].role != Role::User {
+        for i in (0..state.data.history.len()).rev() {
+            if state.data.history[i].role != Role::User {
                 continue;
             }
             if n > 0 {
@@ -295,7 +330,7 @@ async fn main() -> Result<()> {
                 continue;
             }
 
-            state.context.push(state.history[i].clone());
+            state.data.context.push(state.data.history[i].clone());
         }
 
         return Ok(());

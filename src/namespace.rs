@@ -13,36 +13,25 @@ use chatgpt::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-struct ConversationData {
-    model: String,
-    history: Vec<ChatMessage>,
-    context: Vec<ChatMessage>,
-    includes: usize,
-    session_len: usize,
-}
-
-pub struct Namespace {
-    client: ChatGPT,
-    model: ChatGPTEngine,
-    pub name: Option<String>,
+pub struct ConversationData {
+    pub model: String,
     pub history: Vec<ChatMessage>,
     pub context: Vec<ChatMessage>,
     pub includes: usize,
     pub session_len: usize,
 }
 
+pub struct Namespace {
+    client: ChatGPT,
+    pub name: Option<String>,
+    pub data: ConversationData,
+}
+
 impl Namespace {
     // store will save the conversation data in the config dir if self.name is not None
     pub fn store(self: &Self, path: &Path) -> Result<()> {
         let mut file = File::create(path)?;
-        let conv = ConversationData {
-            model: self.model.to_string(),
-            history: self.history.clone(),
-            context: self.context.clone(),
-            includes: self.includes,
-            session_len: self.session_len,
-        };
-        let contents = serde_json::to_string(&conv)?;
+        let contents = serde_json::to_string(&self.data)?;
         file.write_all(contents.as_bytes())?;
 
         Ok(())
@@ -67,12 +56,8 @@ impl Namespace {
 
         Ok(Namespace {
             client,
-            model,
             name,
-            history: conv.history,
-            context: conv.context,
-            includes: conv.includes,
-            session_len: conv.session_len,
+            data: conv,
         })
     }
 
@@ -91,12 +76,14 @@ impl Namespace {
         // TODO have a way to change the number of includes
         Ok(Namespace {
             client,
-            model,
             name,
-            history: vec![],
-            context: vec![],
-            includes: 2,
-            session_len: 0,
+            data: ConversationData {
+                model: engine.to_string(),
+                history: vec![],
+                context: vec![],
+                includes: 2,
+                session_len: 0,
+            },
         })
     }
 
@@ -113,36 +100,37 @@ impl Namespace {
         };
 
         if !extend_session {
-            self.session_len = 0;
+            self.data.session_len = 0;
         }
 
         // Include both the assistant's response and the user's message for each "includes".
-        let includes = (self.includes + self.session_len) * 2;
+        let includes = (self.data.includes + self.data.session_len) * 2;
 
-        self.history.push(message.clone());
+        self.data.history.push(message.clone());
 
-        let history_len = if self.history.len() <= includes + 1 {
+        let history_len = if self.data.history.len() <= includes + 1 {
             0
         } else {
-            self.history.len() - 1 - includes
+            self.data.history.len() - 1 - includes
         };
-        let context_len = self.context.len();
+        let context_len = self.data.context.len();
 
-        self.context
-            .extend_from_slice(&mut self.history[history_len..]);
+        self.data
+            .context
+            .extend_from_slice(&mut self.data.history[history_len..]);
 
-        let response = self.client.send_history(&self.context).await?;
+        let response = self.client.send_history(&self.data.context).await?;
 
-        self.history.push(response.message().clone());
-        let last_user = self.context.pop().unwrap();
-        self.context.truncate(context_len);
+        self.data.history.push(response.message().clone());
+        let last_user = self.data.context.pop().unwrap();
+        self.data.context.truncate(context_len);
         if keep || role == Role::System {
-            self.context.push(last_user);
+            self.data.context.push(last_user);
 
             if role == Role::System {
                 // Keep system messages at the start
                 // TODO configure this to optionally keep system messages at the end. OpenAI says this may be better for 3.5 turbo
-                self.context.sort_by(|a, b| {
+                self.data.context.sort_by(|a, b| {
                     if a.role == Role::System {
                         return Ordering::Less;
                     } else if b.role == Role::System {
@@ -155,7 +143,7 @@ impl Namespace {
         }
 
         if extend_session {
-            self.session_len += 1;
+            self.data.session_len += 1;
         }
 
         Ok(response)
@@ -190,7 +178,10 @@ impl Namespace {
     // To return history,
     pub fn create_conversation(&mut self) -> NamespaceConversation {
         NamespaceConversation {
-            conversation: Conversation::new_with_history(self.client.clone(), self.context.clone()),
+            conversation: Conversation::new_with_history(
+                self.client.clone(),
+                self.data.context.clone(),
+            ),
             space: self,
         }
     }
@@ -215,11 +206,11 @@ impl<'a> Drop for NamespaceConversation<'a> {
     fn drop(&mut self) {
         let mut history = self.conversation.history.to_owned();
 
-        for _ in 0..self.space.context.len() {
+        for _ in 0..self.space.data.context.len() {
             history.remove(0);
         }
 
-        self.space.history.append(&mut history);
+        self.space.data.history.append(&mut history);
     }
 }
 
