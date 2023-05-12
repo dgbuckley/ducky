@@ -115,34 +115,25 @@ fn start_conversation(name: Option<String>, key: &str, arg: &Arg) -> Result<Name
 }
 
 fn load_or_start_conversation(key: &str, name: Option<String>, arg: &Arg) -> Result<Namespace> {
-    match name {
-        Some(name) => {
-            let config_file_path = config_path(&name)?;
+    if let Some(name) = name {
+        let config_file_path = config_path(&name)?;
+        let config_dir_path = config_file_path
+            .parent()
+            .ok_or(anyhow!("Failed to get the parent directory"))?;
 
-            if !config_file_path
-                .parent()
-                .ok_or(anyhow!("Failed to get the parent directory"))?
-                .exists()
-            {
-                fs::create_dir_all(
-                    &config_file_path
-                        .parent()
-                        .ok_or(anyhow!("Failed to get the parent directory"))?,
-                )?;
-            };
+        if !config_dir_path.exists() {
+            fs::create_dir_all(&config_dir_path)?;
+        };
 
-            if !config_file_path.exists() {
-                let client = start_conversation(Some(name), key, arg)?;
-                return Ok(client);
-            }
-
-            let conv = Namespace::load_from(config_file_path.as_path(), Some(name), key)?;
-            return Ok(conv);
+        if !config_file_path.exists() {
+            return start_conversation(Some(name), key, arg);
         }
-        None => {
-            return start_conversation(None, key, arg);
-        }
+
+        let conv = Namespace::load_from(config_file_path.as_path(), Some(name), key)?;
+        return Ok(conv);
     }
+
+    start_conversation(None, key, arg)
 }
 
 fn sha256_hash_string(input: &str) -> String {
