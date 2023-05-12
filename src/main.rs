@@ -15,9 +15,43 @@ use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use sha2::Digest;
 
+#[derive(Clone)]
+enum Color {
+    Auto,
+    Never,
+    Always,
+}
+
+impl std::fmt::Display for Color {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.clone() {
+            Color::Auto => write!(f, "auto"),
+            Color::Never => write!(f, "never"),
+            Color::Always => write!(f, "always"),
+        }
+    }
+}
+
+impl std::str::FromStr for Color {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "auto" => Ok(Color::Auto),
+            "never" => Ok(Color::Never),
+            "always" => Ok(Color::Always),
+            _ => Err(anyhow!("Invalid color option")),
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Arg {
+    #[clap(long,default_value_t = Color::Auto)]
+    /// Specify when to use color output.
+    color: Color,
+
     #[clap(short, long)]
     /// The conversation to send the chat with
     conversation: Option<String>,
@@ -217,7 +251,21 @@ fn conversation_prompt(args: &Arg) -> Result<String> {
     Ok(prompt.trim().to_string())
 }
 
-fn print_markdown(markdown: &str) -> Result<()> {
+fn print_message(markdown: &str, args: &Arg) -> Result<()> {
+    match args.color {
+        Color::Always => pretty_print(markdown),
+        Color::Auto => {
+            if atty::is(atty::Stream::Stdout) {
+                pretty_print(markdown)
+            } else {
+                Ok(print!("{}", markdown))
+            }
+        }
+        Color::Never => Ok(print!("{}", markdown)),
+    }
+}
+
+fn pretty_print(markdown: &str) -> Result<()> {
     let mut printer = PrettyPrinter::new();
     printer.input_from_bytes(markdown.as_bytes());
     printer.language("markdown");
@@ -231,7 +279,7 @@ fn print_markdown(markdown: &str) -> Result<()> {
     Ok(())
 }
 
-async fn repl(state: &mut Namespace) -> Result<()> {
+async fn repl(state: &mut Namespace, args: &Arg) -> Result<()> {
     let mut editor = DefaultEditor::new()?;
 
     let mut convo = state.create_conversation();
@@ -246,7 +294,7 @@ async fn repl(state: &mut Namespace) -> Result<()> {
                     break;
                 }
                 let response = convo.send_message(line.trim()).await?;
-                print_markdown(&response.message().content)?;
+                print_message(&response.message().content, args)?;
             }
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");
@@ -311,7 +359,7 @@ async fn main() -> Result<()> {
     let mut state = load_or_start_conversation(&key, session, &args)?;
 
     if args.repl {
-        repl(&mut state).await?;
+        repl(&mut state, &args).await?;
         return Ok(());
     }
 
@@ -361,7 +409,7 @@ async fn main() -> Result<()> {
         state.send_message(prompt, args.keep, args.persist).await?
     };
 
-    print_markdown(&response.message().content)?;
+    print_message(&response.message().content, &args)?;
 
     if let Some(name) = &state.name {
         let config_file_path = config_path(&name)?;
