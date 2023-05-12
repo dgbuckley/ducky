@@ -3,40 +3,61 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/release-22.11";
-    flake-utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
+    naersk = {
+      url = "github:nix-community/naersk";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs =
-    { self
-    , nixpkgs
-    , flake-utils
-    , rust-overlay
-    }:
-
-    flake-utils.lib.eachDefaultSystem (system:
-    let
-      overlays = [
-        (import rust-overlay)
-        (self: super: {
-          rustToolchain =
-            let
-              rust = super.rust-bin;
-            in
-            if builtins.pathExists ./rust-toolchain.toml then
-              rust.fromRustupToolchainFile ./rust-toolchain.toml
-            else if builtins.pathExists ./rust-toolchain then
-              rust.fromRustupToolchainFile ./rust-toolchain
-            else
-              rust.stable.latest.default;
-        })
+  outputs = {
+    self,
+    nixpkgs,
+    rust-overlay,
+    naersk,
+  }: let
+    inherit (nixpkgs) lib;
+    genSystems =
+      lib.genAttrs
+      [
+        "x86_64-linux"
+        "aarch64-linux"
       ];
 
-      pkgs = import nixpkgs { inherit system overlays; };
-    in
-    {
-      devShells.default = pkgs.mkShell {
-        packages = with pkgs; [
+    pkgsFor = genSystems (system:
+      import nixpkgs {
+        inherit system;
+        overlays = [
+          (import rust-overlay)
+          (self: super: {
+            rustToolchain = let
+              rust = super.rust-bin;
+            in
+              rust.stable.latest.default;
+          })
+        ];
+      });
+  in {
+    packages = genSystems (system: let
+      pkgs = pkgsFor.${system};
+    in rec {
+      default = naersk.lib.${system}.buildPackage {
+        pname = "ducky";
+        root = ./.;
+        buildInputs = [pkgs.openssl pkgs.pkg-config];
+      };
+      ducky = default;
+    });
+
+    overlays.default = _: prev: {
+      ducky = self.packages.${prev.system}.default;
+    };
+
+    devShells = genSystems (system: let
+      pkgs = pkgsFor.${system};
+    in {
+      default = pkgs.mkShell {
+        packages = with pkgs.pkgs; [
           rustToolchain
           openssl
           pkg-config
@@ -51,4 +72,5 @@
         '';
       };
     });
+  };
 }
