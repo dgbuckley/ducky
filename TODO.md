@@ -26,3 +26,4 @@
 - Add conversation creation option asking for initial promt
   - Options for default, a user created template, or custom prompt
   - If template selected give opprotunity to edit and customize it for conversation
+- Have a validation option where a script is run giving recieved code. Stderr will be sent back to chatgpt
