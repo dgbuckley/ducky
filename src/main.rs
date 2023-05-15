@@ -3,7 +3,7 @@ mod namespace;
 use crate::namespace::Namespace;
 
 use std::fs;
-use std::io::{stdin, Read, Write};
+use std::io::{stdin, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
@@ -341,10 +341,16 @@ fn edit_context(state: &mut Namespace) -> Result<()> {
         return Err(anyhow!("Unable to open editor"));
     }
 
+    file.seek(SeekFrom::Start(0))?;
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;
 
     state.data = toml::from_str(&contents)?;
+
+    if let Some(name) = &state.name {
+        let config_file_path = config_path(&name)?;
+        state.store(&config_file_path)?;
+    }
 
     Ok(())
 }
