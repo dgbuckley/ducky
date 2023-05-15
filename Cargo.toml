@@ -2,6 +2,9 @@
 name = "ducky"
 version = "0.1.0"
 edition = "2021"
+license = "GPLv3"
+description = "ducky is a CLI GPT chat tool designed to act as a programming rubber ducky."
+repository = "https://github.com/dgbuckley/ducky"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
