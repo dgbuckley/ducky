@@ -1,6 +1,6 @@
 [package]
 name = "ducky"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "GPLv3"
 description = "ducky is a CLI GPT chat tool designed to act as a programming rubber ducky."
